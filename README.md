@@ -32,4 +32,11 @@ The game features a modern-themed homepage, customizable colors, and a ghost tha
    - `⬇ Down Arrow` → Move Down  
 4. Eat the **white dots** to increase your score.  
 5. Avoid the **red ghost** — if it catches you, the game ends!  
-6. Try to beat your **highest score**.  
+6. Try to beat your **highest score**.
+
+
+
+
+
+[![Athena Award Badge](https://img.shields.io/endpoint?url=https%3A%2F%2Faward.athena.hackclub.com%2Fapi%2Fbadge)](https://award.athena.hackclub.com?utm_source=readme)
+
