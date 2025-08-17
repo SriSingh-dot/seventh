@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>RunAlive — Maze (BFS ghost)</title>
+<style>
+:root{--bg:#061028;--card:#071026;--muted:#9fb3d9;--accent:#4dd2ff;--accent2:#7dffb3}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,Arial;background:linear-gradient(180deg,#030416 0%,#061028 100%);color:#e8f0ff}
+.container{max-width:1100px;margin:24px auto;padding:18px}
+.header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.brand{display:flex;gap:12px;align-items:center}
+.logo{width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 10px 30px rgba(0,0,0,.5)}
+h1{margin:0;font-size:26px}
+.controls{display:flex;gap:10px;align-items:center}
+select,button{padding:8px 12px;border-radius:10px;border:0;font-weight:700;cursor:pointer}
+button.primary{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#071018}
+.grid{display:grid;grid-template-columns:1fr 520px;gap:18px;margin-top:16px}
+@media(max-width:980px){.grid{grid-template-columns:1fr}}
+.card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:14px;padding:18px;border:1px solid rgba(255,255,255,0.03)}
+.kpi{display:flex;gap:18px;align-items:center;margin-top:10px}
+.kpi .val{font-weight:800;font-size:20px}
+.canvas-shell{padding:12px;border-radius:14px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.04)}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#020318}
+.footer{margin-top:18px;text-align:center;color:#9fb3d9;font-size:13px}
+/* modal */
+.modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.6);z-index:60}
+.modal.open{display:grid}
+.sheet{width:min(560px,94vw);background:#071026;padding:18px;border-radius:12px;border:1px solid rgba(255,255,255,0.06)}
+.small{font-size:13px;color:#9fb3d9}
+</style>
+</head>
+<body data-theme="navy">
+<div class="container">
+  <div class="header">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"></div>
+      <div>
+        <h1>RunAlive</h1>
+        <div style="color:#9fb3d9;font-size:13px">Maze Edition — Arrow keys only · © SriSingh 2025</div>
+      </div>
+    </div>
+    <div class="controls">
+      <label class="small" for="theme">Theme</label>
+      <select id="theme">
+        <option value="navy">Navy</option>
+        <option value="midnight">Midnight</option>
+        <option value="neon">Neon</option>
+      </select>
+      <button id="startBtn" class="primary">Start Game</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2 style="margin:0 0 8px">Welcome, Runner</h2>
+      <p class="small">Collect dots, avoid the ghost. Movement obeys the maze walls. The ghost uses BFS pathfinding to chase around walls.</p>
+
+      <div class="kpi">
+        <div><div class="small">Highest Score</div><div id="best" class="val">0</div></div>
+        <div><div class="small">Current Score</div><div id="score" class="val">0</div></div>
+      </div>
+
+      <div style="margin-top:12px">
+        <button id="resetBest">Reset High Score</button>
+      </div>
+    </section>
+
+    <section class="card canvas-shell">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="small">Use <strong>Arrow Keys</strong> only • Press <strong>R</strong> to restart</div>
+        <div class="small">Dots left: <span id="dotsLeft">0</span></div>
+      </div>
+      <canvas id="board" width="672" height="672" aria-label="RunAlive maze"></canvas>
+    </section>
+  </div>
+
+  <div class="footer">Made by SriSingh • © SriSingh 2025</div>
+</div>
+
+<div class="modal" id="modal"><div class="sheet">
+  <h3 id="modalTitle">Game Over</h3>
+  <p id="modalMsg" class="small"></p>
+  <div style="display:flex;gap:12px;margin-top:12px">
+    <button id="playAgain" class="primary">Play Again</button>
+    <button id="backHome">Back to Home</button>
+  </div>
+</div></div>
+
+<script>
+/* Full single-file game with BFS ghost. Save as runalive.html and open. */
+
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+const TILE = 32, ROWS = 21, COLS = 21; // 21*32 = 672
+const MAZE = [
+"111111111111111111111",
+"100000000010000000001",
+"101111011110111101101",
+"101000010000100001001",
+"101011110111101110101",
+"101010000100001000101",
+"101011110101111110101",
+"101000010100000010101",
+"101110010111111010101",
+"100010000000000010001",
+"111010111000111010111",
+"100010000000000010001",
+"101110111011110111101",
+"101000001010100000101",
+"101011111010111110101",
+"101000000010000000101",
+"101111111010111111101",
+"101000000000000000101",
+"101011111111111110101",
+"100000000000000000001",
+"111111111111111111111"
+].map(r=>r.split('').map(Number));
+
+// DOM
+const startBtn = document.getElementById('startBtn');
+const themeSel = document.getElementById('theme');
+const bestEl = document.getElementById('best');
+const scoreEl = document.getElementById('score');
+const dotsLeftEl = document.getElementById('dotsLeft');
+const modal = document.getElementById('modal');
+const modalTitle = document.getElementById('modalTitle');
+const modalMsg = document.getElementById('modalMsg');
+const playAgain = document.getElementById('playAgain');
+const backHome = document.getElementById('backHome');
+const resetBest = document.getElementById('resetBest');
+
+// storage
+const HS_KEY = 'runalive_highscore';
+let best = parseInt(localStorage.getItem(HS_KEY) || '0', 10);
+bestEl.textContent = best;
+
+// game state
+let dots = new Set();
+let player = null;
+let ghost = null;
+let score = 0;
+let running = false;
+let raf = null;
+
+// helpers
+const keyOf = (r,c) => `${r}_${c}`;
+const inBounds = (r,c) => r>=0 && c>=0 && r<ROWS && c<COLS;
+const isWall = (r,c) => !inBounds(r,c) || MAZE[r][c]===1;
+function snapToCenter(entity){ entity.x = entity.c*TILE + TILE/2; entity.y = entity.r*TILE + TILE/2; }
+
+// init dots and entities
+function resetDots(){
+  dots.clear();
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(MAZE[r][c]===0) dots.add(keyOf(r,c));
+    }
+  }
+  // remove spawn tiles if present
+  dots.delete(keyOf(10,10));
+  dots.delete(keyOf(1,1));
+  dotsLeftEl.textContent = dots.size;
+}
+function resetEntities(){
+  player = {r:10,c:10,x:10*TILE+TILE/2,y:10*TILE+TILE/2,dir:{r:0,c:0},next:{r:0,c:0}};
+  ghost  = {r:1,c:1,x:1*TILE+TILE/2,y:1*TILE+TILE/2,dir:{r:0,c:0}};
+  score = 0; scoreEl.textContent = score;
+}
+
+// draw
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // floor
+  ctx.fillStyle = '#020318'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  // maze
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const x=c*TILE,y=r*TILE;
+      if(MAZE[r][c]===1){
+        ctx.fillStyle = '#0b1836'; ctx.fillRect(x,y,TILE,TILE);
+        ctx.strokeStyle = 'rgba(77,210,255,0.06)'; ctx.strokeRect(x+1,y+1,TILE-2,TILE-2);
+      } else {
+        ctx.fillStyle = '#061028'; ctx.fillRect(x,y,TILE,TILE);
+      }
+    }
+  }
+  // dots
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#4dd2ff';
+  for(const k of dots){
+    const [r,c] = k.split('_').map(Number);
+    ctx.beginPath(); ctx.arc(c*TILE+TILE/2, r*TILE+TILE/2, 4,0,Math.PI*2); ctx.fill();
+  }
+  // player
+  ctx.save(); ctx.translate(player.x, player.y);
+  ctx.fillStyle = 'gold';
+  const mouth = (Math.sin(Date.now()/120)+1)*0.25 + 0.15;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,12, mouth*Math.PI, (2-mouth*Math.PI), false); ctx.closePath(); ctx.fill(); ctx.restore();
+  // ghost
+  ctx.save(); ctx.translate(ghost.x, ghost.y);
+  ctx.fillStyle = '#ff5a7a';
+  ctx.beginPath(); ctx.arc(0,-6,12,Math.PI,0); ctx.lineTo(12,10); ctx.lineTo(-12,10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-5,-6,3,0,Math.PI*2); ctx.arc(5,-6,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#1b2a5a'; ctx.beginPath(); ctx.arc(-5,-6,1.2,0,Math.PI*2); ctx.arc(5,-6,1.2,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+// BFS pathfinding from (sr,sc) -> (tr,tc). Returns next tile [r,c] after start, or null if no path.
+function bfsNext(sr,sc,tr,tc){
+  if(sr===tr && sc===tc) return null;
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  const visited = Array.from({length:ROWS}, ()=> Array(COLS).fill(false));
+  const prev = Array.from({length:ROWS}, ()=> Array(COLS).fill(null));
+  const q = [];
+  q.push([sr,sc]); visited[sr][sc]=true;
+  let found = false;
+  while(q.length){
+    const [r,c] = q.shift();
+    if(r===tr && c===tc){ found=true; break; }
+    for(const [dr,dc] of dirs){
+      const nr=r+dr, nc=c+dc;
+      if(!inBounds(nr,nc)) continue;
+      if(visited[nr][nc]) continue;
+      if(MAZE[nr][nc]===1) continue;
+      visited[nr][nc]=true; prev[nr][nc]=[r,c]; q.push([nr,nc]);
+    }
+  }
+  if(!found) return null;
+  // reconstruct: step backwards from target until we reach a cell whose prev is start
+  let cur = [tr,tc];
+  while(true){
+    const p = prev[cur[0]][cur[1]];
+    if(!p) break;
+    if(p[0]===sr && p[1]===sc) return cur; // cur is the first step after start
+    cur = p;
+  }
+  return null;
+}
+
+// per-tick update
+const SPEED = 3; // pixels per tick
+function atTileCenter(entity){ const cx = entity.c*TILE + TILE/2; const cy = entity.r*TILE + TILE/2; return Math.abs(entity.x-cx)<2 && Math.abs(entity.y-cy)<2; }
+
+function step(){
+  if(!running) return;
+  // player: set dir at centers only
+  if(atTileCenter(player)){
+    // update grid pos
+    player.r = Math.round((player.y - TILE/2)/TILE);
+    player.c = Math.round((player.x - TILE/2)/TILE);
+    // attempt taking next direction if valid
+    const nr = player.r + player.next.r, nc = player.c + player.next.c;
+    if(!isWall(nr,nc)){
+      player.dir = {r: player.next.r, c: player.next.c};
+    } else {
+      // if current dir blocked, stop
+      const tr = player.r + player.dir.r, tc = player.c + player.dir.c;
+      if(isWall(tr,tc)) player.dir = {r:0,c:0};
+    }
+  }
+  // move player pixelwise
+  player.x += player.dir.c * SPEED;
+  player.y += player.dir.r * SPEED;
+  // update logical tile if moved enough
+  player.r = Math.round((player.y - TILE/2)/TILE);
+  player.c = Math.round((player.x - TILE/2)/TILE);
+  // collect dot
+  const pk = keyOf(player.r, player.c);
+  if(dots.has(pk)){ dots.delete(pk); score += 10; scoreEl.textContent = score; dotsLeftEl.textContent = dots.size; if(dots.size===0){ // win -> show modal
+    running = false; showModal('Level cleared!', `You collected all dots! Score: ${score}`); saveHigh(); return; } }
+
+  // ghost: choose next tile using BFS when at center
+  if(atTileCenter(ghost)){
+    ghost.r = Math.round((ghost.y - TILE/2)/TILE);
+    ghost.c = Math.round((ghost.x - TILE/2)/TILE);
+    const next = bfsNext(ghost.r, ghost.c, player.r, player.c);
+    if(next){
+      ghost.dir = {r: next[0]-ghost.r, c: next[1]-ghost.c};
+    } else {
+      // fallback: random neighbor
+      const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+      const choices = dirs.filter(d => !isWall(ghost.r+d[0], ghost.c+d[1]));
+      if(choices.length) { const ch = choices[Math.floor(Math.random()*choices.length)]; ghost.dir = {r:ch[0], c:ch[1]}; } else ghost.dir={r:0,c:0};
+    }
+    snapToCenter(ghost);
+  }
+  // move ghost pixelwise (slightly faster or same speed)
+  ghost.x += ghost.dir.c * (SPEED * 0.95);
+  ghost.y += ghost.dir.r * (SPEED * 0.95);
+  ghost.r = Math.round((ghost.y - TILE/2)/TILE);
+  ghost.c = Math.round((ghost.x - TILE/2)/TILE);
+
+  // collision (tile-based)
+  if(player.r === ghost.r && player.c === ghost.c){
+    running = false;
+    saveHigh();
+    showModal('Game Over', `You were caught! Score: ${score}`);
+    return;
+  }
+
+  draw();
+  raf = requestAnimationFrame(step);
+}
+
+// start/restart/save modal
+function startGame(){
+  resetDots(); resetEntities(); score = 0; scoreEl.textContent = 0; dotsLeftEl.textContent = dots.size;
+  running = true; modal.classList.remove('open');
+  cancelAnimationFrame(raf); raf = requestAnimationFrame(step);
+  startBtn.disabled = true; startBtn.textContent = 'Running...';
+}
+function restartGame(){
+  resetDots(); resetEntities(); score = 0; scoreEl.textContent = 0; dotsLeftEl.textContent = dots.size;
+  if(!running) startGame();
+}
+function saveHigh(){ if(score > best){ best = score; localStorage.setItem(HS_KEY, String(best)); bestEl.textContent = best; } }
+function showModal(title,msg){
+  modalTitle.textContent = title; modalMsg.innerHTML = `<div class="small">${msg}</div>`; modal.classList.add('open'); startBtn.disabled = false; startBtn.textContent = 'Start Game';
+}
+function stopToHome(){ running=false; cancelAnimationFrame(raf); modal.classList.remove('open'); startBtn.disabled=false; startBtn.textContent='Start Game'; draw(); }
+
+// input
+window.addEventListener('keydown', (e)=>{
+  const k = e.key;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','r','R'].includes(k)) e.preventDefault();
+  if(k === 'ArrowLeft') player.next = {r:0,c:-1};
+  else if(k === 'ArrowRight') player.next = {r:0,c:1};
+  else if(k === 'ArrowUp') player.next = {r:-1,c:0};
+  else if(k === 'ArrowDown') player.next = {r:1,c:0};
+  else if(k === 'r' || k === 'R') restartGame();
+});
+
+// UI wiring
+startBtn.addEventListener('click', ()=> startGame());
+playAgain.addEventListener('click', ()=> { modal.classList.remove('open'); startGame(); });
+backHome.addEventListener('click', ()=> { stopToHome(); });
+resetBest.addEventListener('click', ()=> { localStorage.removeItem(HS_KEY); best = 0; bestEl.textContent = 0; });
+
+// theme persistence
+function loadTheme(){ const t = localStorage.getItem('runalive_theme') || 'navy'; document.body.setAttribute('data-theme', t); themeSel.value = t; }
+themeSel.addEventListener('change', ()=> { localStorage.setItem('runalive_theme', themeSel.value); loadTheme(); });
+loadTheme();
+
+// initial setup
+resetDots(); resetEntities(); draw();
+dotsLeftEl.textContent = dots.size;
+scoreEl.textContent = 0;
+bestEl.textContent = best;
+</script>
+</body>
+</html>
